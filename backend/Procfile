@@ -1,0 +1,8 @@
+# Procfile для Render деплоя
+
+# Web service (Flask API)
+web: cd src && python main.py
+
+# Background worker (Redis Queue)
+worker: cd src && python workers/worker.py
+
