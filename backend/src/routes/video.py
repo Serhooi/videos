@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, Response, make_response
 from flask_cors import cross_origin
 from werkzeug.utils import secure_filename
 from datetime import datetime
@@ -463,17 +463,114 @@ def download_render(render_id):
             'error': str(e)
         }), 500
 
-@video_bp.route('/files/<filename>', methods=['GET'])
-@cross_origin()
+@video_bp.route('/files/<filename>', methods=['GET', 'OPTIONS'])
+@cross_origin(
+    origins='*',
+    methods=['GET', 'OPTIONS'],
+    allow_headers=['Content-Type', 'Range'],
+    expose_headers=['Content-Range', 'Accept-Ranges', 'Content-Length']
+)
 def serve_file(filename):
-    """Отдать файл (для локальной разработки)"""
+    """Serve video files with proper CORS headers and range support"""
     try:
+        # Security: validate filename
+        if not filename or '..' in filename or '/' in filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+            
         file_path = os.path.join(UPLOAD_FOLDER, filename)
-        if os.path.exists(file_path):
-            return send_file(file_path)
-        else:
+        
+        if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
+        
+        # Handle OPTIONS request for CORS preflight
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Range'
+            response.headers['Access-Control-Expose-Headers'] = 'Content-Range, Accept-Ranges, Content-Length'
+            return response
+        
+        # Get file info
+        file_size = os.path.getsize(file_path)
+        
+        # Handle Range requests for video streaming
+        range_header = request.headers.get('Range')
+        
+        if range_header:
+            # Parse range header
+            byte_start = 0
+            byte_end = file_size - 1
+            
+            if range_header.startswith('bytes='):
+                range_match = range_header[6:].split('-')
+                if range_match[0]:
+                    byte_start = int(range_match[0])
+                if range_match[1]:
+                    byte_end = int(range_match[1])
+            
+            # Ensure valid range
+            byte_start = max(0, byte_start)
+            byte_end = min(file_size - 1, byte_end)
+            content_length = byte_end - byte_start + 1
+            
+            # Create response with partial content
+            def generate():
+                with open(file_path, 'rb') as f:
+                    f.seek(byte_start)
+                    remaining = content_length
+                    while remaining:
+                        chunk_size = min(8192, remaining)
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+            
+            response = Response(
+                generate(),
+                206,  # Partial Content
+                mimetype='video/mp4',
+                direct_passthrough=True
+            )
+            
+            response.headers['Content-Range'] = f'bytes {byte_start}-{byte_end}/{file_size}'
+            response.headers['Accept-Ranges'] = 'bytes'
+            response.headers['Content-Length'] = str(content_length)
+            
+        else:
+            # Full file response
+            def generate():
+                with open(file_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(8192)
+                        if not chunk:
+                            break
+                        yield chunk
+            
+            response = Response(
+                generate(),
+                200,
+                mimetype='video/mp4',
+                direct_passthrough=True
+            )
+            
+            response.headers['Content-Length'] = str(file_size)
+            response.headers['Accept-Ranges'] = 'bytes'
+        
+        # ✅ CRITICAL: Add CORS headers for video files
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Range'
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Range, Accept-Ranges, Content-Length'
+        
+        # Cache headers for better performance
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+        
+        return response
+        
     except Exception as e:
+        print(f"Error serving file {filename}: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @video_bp.route('/health', methods=['GET'])
