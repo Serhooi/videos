@@ -34,21 +34,61 @@ def get_user_id():
 
 def upload_to_storage(file_path, filename):
     """Загрузить файл в Supabase Storage"""
+    print(f"🔍 [DEBUG] Starting upload_to_storage for file: {filename}")
+    print(f"🔍 [DEBUG] File path: {file_path}")
+    print(f"🔍 [DEBUG] File exists: {os.path.exists(file_path)}")
+    
     try:
         from src.services.storage_service import get_storage_client
         storage = get_storage_client()
         
+        print(f"🔍 [DEBUG] Storage client initialized: {storage is not None}")
+        
         if storage:
             with open(file_path, 'rb') as f:
-                result = storage.upload(f"videos/{filename}", f.read())
+                file_content = f.read()
+            
+            print(f"🔍 [DEBUG] File content read. Size: {len(file_content)} bytes")
+            
+            # Используем правильный bucket name
+            bucket_name = "video-editor"
+            file_path_in_storage = f"videos/{filename}"
+            
+            print(f"🔍 [DEBUG] Uploading to bucket: {bucket_name}, path: {file_path_in_storage}")
+            
+            try:
+                result = storage.from_(bucket_name).upload(
+                    file_path_in_storage, 
+                    file_content,
+                    file_options={
+                        "content-type": "video/mp4",
+                        "cache-control": "3600"
+                    }
+                )
+                
+                print(f"🔍 [DEBUG] Supabase upload result: {result}")
+                
                 if result:
-                    return storage.get_public_url(f"videos/{filename}")
+                    public_url = storage.from_(bucket_name).get_public_url(file_path_in_storage)
+                    print(f"✅ [DEBUG] File uploaded to Supabase. Public URL: {public_url}")
+                    return public_url
+                else:
+                    print(f"❌ [DEBUG] Supabase upload failed. Result: {result}")
+                    
+            except Exception as upload_error:
+                print(f"❌ [DEBUG] Supabase upload exception: {upload_error}")
+                
+        else:
+            print("❌ [DEBUG] Supabase storage client not available.")
         
-        # Fallback - возвращаем локальный путь
+        # Fallback - возвращаем локальный путь (ВРЕМЕННО для отладки)
+        print(f"🔄 [DEBUG] Using fallback local path for: {filename}")
         return f"/api/video/files/{filename}"
         
     except Exception as e:
-        print(f"Storage upload failed: {e}")
+        print(f"❌ [DEBUG] Error during upload_to_storage: {e}")
+        import traceback
+        print(f"❌ [DEBUG] Full traceback: {traceback.format_exc()}")
         return f"/api/video/files/{filename}"
 
 def generate_waveform_data(duration=60):

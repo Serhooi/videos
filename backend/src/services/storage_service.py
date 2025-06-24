@@ -136,3 +136,27 @@ def init_storage_service(supabase_url: str, supabase_key: str):
     storage_service.ensure_bucket_exists()
     return storage_service
 
+
+
+def get_storage_client():
+    """Получить клиент хранения с отладочными логами"""
+    print(f"🔍 [DEBUG] Attempting to get storage client.")
+    
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_anon_key = os.getenv("SUPABASE_ANON_KEY")
+    
+    print(f"🔍 [DEBUG] SUPABASE_URL: {supabase_url is not None}")
+    print(f"🔍 [DEBUG] SUPABASE_ANON_KEY: {supabase_anon_key is not None}")
+    
+    if supabase_url and supabase_anon_key:
+        try:
+            client = create_client(supabase_url, supabase_anon_key)
+            print(f"✅ [DEBUG] Supabase client created successfully.")
+            return client.storage
+        except Exception as e:
+            print(f"❌ [DEBUG] Error creating Supabase client: {e}")
+            return None
+    else:
+        print("❌ [DEBUG] Supabase environment variables not set.")
+        return None
+
