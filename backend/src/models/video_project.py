@@ -1,13 +1,14 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import uuid
+from sqlalchemy.dialects.postgresql import UUID
 
 db = SQLAlchemy()
 
 class VideoProject(db.Model):
     __tablename__ = 'video_projects'
     
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = db.Column(db.String(36), nullable=False)
     name = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
@@ -35,7 +36,7 @@ class VideoProject(db.Model):
     
     def to_dict(self):
         return {
-            'id': self.id,
+            'id': str(self.id),
             'user_id': self.user_id,
             'name': self.name,
             'description': self.description,
@@ -55,8 +56,8 @@ class VideoProject(db.Model):
 class VideoRender(db.Model):
     __tablename__ = 'video_renders'
     
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = db.Column(db.String(36), db.ForeignKey('video_projects.id'), nullable=False)
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = db.Column(UUID(as_uuid=True), db.ForeignKey('video_projects.id'), nullable=False)
     user_id = db.Column(db.String(36), nullable=False)
     
     # Render settings
@@ -84,8 +85,8 @@ class VideoRender(db.Model):
     
     def to_dict(self):
         return {
-            'id': self.id,
-            'project_id': self.project_id,
+            'id': str(self.id),
+            'project_id': str(self.project_id),
             'user_id': self.user_id,
             'format': self.format,
             'quality': self.quality,
@@ -104,8 +105,8 @@ class VideoRender(db.Model):
 class VideoSession(db.Model):
     __tablename__ = 'video_sessions'
     
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = db.Column(db.String(36), db.ForeignKey('video_projects.id'), nullable=False)
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = db.Column(UUID(as_uuid=True), db.ForeignKey('video_projects.id'), nullable=False)
     user_id = db.Column(db.String(36), nullable=False)
     user_name = db.Column(db.String(255))
     user_color = db.Column(db.String(7), default='#3B82F6')
@@ -119,8 +120,8 @@ class VideoSession(db.Model):
     
     def to_dict(self):
         return {
-            'id': self.id,
-            'project_id': self.project_id,
+            'id': str(self.id),
+            'project_id': str(self.project_id),
             'user_id': self.user_id,
             'user_name': self.user_name,
             'user_color': self.user_color,
