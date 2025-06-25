@@ -38,6 +38,10 @@ def upload_to_storage(file_path, filename):
     print(f"🔍 [DEBUG] File path: {file_path}")
     print(f"🔍 [DEBUG] File exists: {os.path.exists(file_path)}")
     
+    if not os.path.exists(file_path):
+        print(f"❌ [DEBUG] File does not exist: {file_path}")
+        return None
+    
     try:
         from src.services.storage_service import get_storage_client
         storage = get_storage_client()
@@ -77,6 +81,8 @@ def upload_to_storage(file_path, filename):
                     
             except Exception as upload_error:
                 print(f"❌ [DEBUG] Supabase upload exception: {upload_error}")
+                import traceback
+                print(f"❌ [DEBUG] Upload traceback: {traceback.format_exc()}")
                 
         else:
             print("❌ [DEBUG] Supabase storage client not available.")
@@ -159,25 +165,50 @@ def get_projects():
 @video_bp.route('/projects', methods=['POST'])
 @cross_origin()
 def create_project():
-    """Создать новый проект"""
+    """Создать новый проект с улучшенной обработкой FormData"""
     try:
-        user_id = get_user_id()
+        print(f"🔍 [DEBUG] === CREATE PROJECT STARTED ===")
+        print(f"🔍 [DEBUG] Request method: {request.method}")
+        print(f"🔍 [DEBUG] Content-Type: {request.content_type}")
+        print(f"🔍 [DEBUG] Request files keys: {list(request.files.keys())}")
+        print(f"🔍 [DEBUG] Request form keys: {list(request.form.keys())}")
         
-        # Проверяем наличие файла
-        if 'video_file' not in request.files:
+        user_id = get_user_id()
+        print(f"🔍 [DEBUG] User ID: {user_id}")
+        
+        # Ищем файл под разными возможными именами
+        file = None
+        file_field_name = None
+        
+        possible_file_fields = ['video_file', 'file', 'video', 'videoFile', 'upload']
+        for field_name in possible_file_fields:
+            if field_name in request.files:
+                file = request.files[field_name]
+                file_field_name = field_name
+                print(f"🔍 [DEBUG] Found file in field: {field_name}")
+                break
+        
+        if not file:
+            print(f"❌ [DEBUG] No video file found in any field")
             return jsonify({
                 'success': False,
-                'error': 'No video file provided'
+                'error': 'No video file provided',
+                'available_fields': list(request.files.keys())
             }), 400
         
-        file = request.files['video_file']
+        print(f"🔍 [DEBUG] File field name: {file_field_name}")
+        print(f"🔍 [DEBUG] File filename: {file.filename}")
+        print(f"🔍 [DEBUG] File content type: {file.content_type}")
+        
         if file.filename == '':
+            print(f"❌ [DEBUG] Empty filename")
             return jsonify({
                 'success': False,
                 'error': 'No file selected'
             }), 400
         
         if not allowed_file(file.filename):
+            print(f"❌ [DEBUG] File type not allowed: {file.filename}")
             return jsonify({
                 'success': False,
                 'error': f'File type not allowed. Supported: {", ".join(ALLOWED_EXTENSIONS)}'
@@ -187,10 +218,16 @@ def create_project():
         filename = secure_filename(file.filename)
         unique_filename = f"{uuid.uuid4()}_{filename}"
         file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+        
+        print(f"🔍 [DEBUG] Saving file to: {file_path}")
         file.save(file_path)
         
         # Проверяем размер файла
-        if os.path.getsize(file_path) > MAX_FILE_SIZE:
+        file_size = os.path.getsize(file_path)
+        print(f"🔍 [DEBUG] File saved. Size: {file_size} bytes")
+        
+        if file_size > MAX_FILE_SIZE:
+            print(f"❌ [DEBUG] File too large: {file_size} > {MAX_FILE_SIZE}")
             os.remove(file_path)
             return jsonify({
                 'success': False,
@@ -198,16 +235,28 @@ def create_project():
             }), 400
         
         # Обрабатываем видео
+        print(f"🔍 [DEBUG] Processing video metadata...")
         metadata = simulate_video_processing(file_path)
+        print(f"🔍 [DEBUG] Video metadata: {metadata}")
         
         # Загружаем в storage
+        print(f"🔍 [DEBUG] Starting upload to storage...")
         original_url = upload_to_storage(file_path, unique_filename)
+        print(f"🔍 [DEBUG] Upload to storage completed. URL: {original_url}")
+        
+        # Получаем данные из формы
+        project_name = request.form.get('name', filename.rsplit('.', 1)[0])
+        project_description = request.form.get('description', '')
+        
+        print(f"🔍 [DEBUG] Project name: {project_name}")
+        print(f"🔍 [DEBUG] Project description: {project_description}")
         
         # Создаем проект
+        print(f"🔍 [DEBUG] Creating project in database...")
         project = VideoProject(
             user_id=user_id,
-            name=request.form.get('name', filename.rsplit('.', 1)[0]),
-            description=request.form.get('description', ''),
+            name=project_name,
+            description=project_description,
             original_url=original_url,
             duration=metadata['duration'],
             resolution=metadata['resolution'],
@@ -218,11 +267,16 @@ def create_project():
         db.session.add(project)
         db.session.commit()
         
+        print(f"✅ [DEBUG] Project created successfully. ID: {project.id}")
+        
         # Удаляем временный файл
         try:
             os.remove(file_path)
-        except:
-            pass
+            print(f"🔍 [DEBUG] Temporary file removed: {file_path}")
+        except Exception as cleanup_error:
+            print(f"⚠️ [DEBUG] Could not remove temporary file: {cleanup_error}")
+        
+        print(f"🔍 [DEBUG] === CREATE PROJECT COMPLETED ===")
         
         return jsonify({
             'success': True,
@@ -230,6 +284,9 @@ def create_project():
         })
         
     except Exception as e:
+        print(f"❌ [DEBUG] Error in create_project: {e}")
+        import traceback
+        print(f"❌ [DEBUG] Full traceback: {traceback.format_exc()}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -503,129 +560,49 @@ def download_render(render_id):
             'error': str(e)
         }), 500
 
-@video_bp.route('/files/<filename>', methods=['GET', 'OPTIONS'])
-@cross_origin(
-    origins='*',
-    methods=['GET', 'OPTIONS'],
-    allow_headers=['Content-Type', 'Range'],
-    expose_headers=['Content-Range', 'Accept-Ranges', 'Content-Length']
-)
+@video_bp.route('/files/<filename>', methods=['GET'])
+@cross_origin()
 def serve_file(filename):
-    """Serve video files with proper CORS headers and range support"""
+    """Отдать файл (fallback для локальных файлов)"""
     try:
-        # Security: validate filename
-        if not filename or '..' in filename or '/' in filename:
-            return jsonify({'error': 'Invalid filename'}), 400
-            
         file_path = os.path.join(UPLOAD_FOLDER, filename)
         
         if not os.path.exists(file_path):
-            return jsonify({'error': 'File not found'}), 404
+            return jsonify({'success': False, 'error': 'File not found'}), 404
         
-        # Handle OPTIONS request for CORS preflight
-        if request.method == 'OPTIONS':
-            response = make_response()
-            response.headers['Access-Control-Allow-Origin'] = '*'
-            response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Range'
-            response.headers['Access-Control-Expose-Headers'] = 'Content-Range, Accept-Ranges, Content-Length'
-            return response
-        
-        # Get file info
-        file_size = os.path.getsize(file_path)
-        
-        # Handle Range requests for video streaming
-        range_header = request.headers.get('Range')
-        
-        if range_header:
-            # Parse range header
-            byte_start = 0
-            byte_end = file_size - 1
-            
-            if range_header.startswith('bytes='):
-                range_match = range_header[6:].split('-')
-                if range_match[0]:
-                    byte_start = int(range_match[0])
-                if range_match[1]:
-                    byte_end = int(range_match[1])
-            
-            # Ensure valid range
-            byte_start = max(0, byte_start)
-            byte_end = min(file_size - 1, byte_end)
-            content_length = byte_end - byte_start + 1
-            
-            # Create response with partial content
-            def generate():
-                with open(file_path, 'rb') as f:
-                    f.seek(byte_start)
-                    remaining = content_length
-                    while remaining:
-                        chunk_size = min(8192, remaining)
-                        chunk = f.read(chunk_size)
-                        if not chunk:
-                            break
-                        remaining -= len(chunk)
-                        yield chunk
-            
-            response = Response(
-                generate(),
-                206,  # Partial Content
-                mimetype='video/mp4',
-                direct_passthrough=True
-            )
-            
-            response.headers['Content-Range'] = f'bytes {byte_start}-{byte_end}/{file_size}'
-            response.headers['Accept-Ranges'] = 'bytes'
-            response.headers['Content-Length'] = str(content_length)
-            
-        else:
-            # Full file response
-            def generate():
-                with open(file_path, 'rb') as f:
-                    while True:
-                        chunk = f.read(8192)
-                        if not chunk:
-                            break
-                        yield chunk
-            
-            response = Response(
-                generate(),
-                200,
-                mimetype='video/mp4',
-                direct_passthrough=True
-            )
-            
-            response.headers['Content-Length'] = str(file_size)
-            response.headers['Accept-Ranges'] = 'bytes'
-        
-        # ✅ CRITICAL: Add CORS headers for video files
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Range'
-        response.headers['Access-Control-Expose-Headers'] = 'Content-Range, Accept-Ranges, Content-Length'
-        
-        # Cache headers for better performance
-        response.headers['Cache-Control'] = 'public, max-age=3600'
-        
-        return response
+        return send_file(file_path, as_attachment=False)
         
     except Exception as e:
-        print(f"Error serving file {filename}: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @video_bp.route('/health', methods=['GET'])
 @cross_origin()
 def health_check():
     """Health check endpoint"""
-    return jsonify({
-        'success': True,
-        'status': 'healthy',
-        'service': 'video-editor-backend',
-        'endpoints': {
-            'projects': '/api/video/projects',
-            'render': '/api/video/projects/{id}/render',
-            'status': '/api/video/renders/{id}',
-            'waveform': '/api/video/projects/{id}/waveform'
-        }
-    })
+    try:
+        # Проверяем подключение к базе данных
+        db.session.execute('SELECT 1')
+        
+        # Проверяем storage
+        from src.services.storage_service import get_storage_client
+        storage = get_storage_client()
+        
+        return jsonify({
+            'success': True,
+            'status': 'healthy',
+            'database': True,
+            'storage': storage is not None,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.utcnow().isoformat()
+        }), 500
 
