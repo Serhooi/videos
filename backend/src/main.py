@@ -3,6 +3,11 @@ import sys
 # DON'T CHANGE THIS !!!
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+# Debug: Check environment variables
+print(f"🔍 [DEBUG] main.py - SUPABASE_URL: {os.getenv('SUPABASE_URL')}")
+print(f"🔍 [DEBUG] main.py - SUPABASE_ANON_KEY: {os.getenv('SUPABASE_ANON_KEY')}")
+print(f"🔍 [DEBUG] main.py - DATABASE_URL: {os.getenv('DATABASE_URL')}")
+
 from flask import Flask, send_from_directory, jsonify
 from flask_cors import CORS
 from src.config.cors import configure_cors
