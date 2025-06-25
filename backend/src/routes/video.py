@@ -74,6 +74,9 @@ def upload_to_storage(file_path, filename):
                 
                 if result:
                     public_url = storage.from_(bucket_name).get_public_url(file_path_in_storage)
+                    # 🚀 Убираем лишний ? в конце URL
+                    if public_url.endswith('?'):
+                        public_url = public_url[:-1]
                     print(f"✅ [DEBUG] File uploaded to Supabase. Public URL: {public_url}")
                     return public_url
                 else:
