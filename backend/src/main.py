@@ -25,6 +25,19 @@ configure_cors(app)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'asdf#FGSgvasgf$5$WGT')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# 🚀 КРИТИЧЕСКИ ВАЖНЫЕ настройки для обработки файлов
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB максимальный размер файла
+app.config['UPLOAD_FOLDER'] = '/tmp/video_uploads'
+app.config['MAX_CONTENT_PATH'] = None  # Убираем ограничения на путь
+
+# Создаем папку для загрузок если её нет
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+print(f"🔍 [DEBUG] Flask file upload configuration:")
+print(f"🔍 [DEBUG] - MAX_CONTENT_LENGTH: {app.config['MAX_CONTENT_LENGTH']} bytes ({app.config['MAX_CONTENT_LENGTH'] // (1024*1024)} MB)")
+print(f"🔍 [DEBUG] - UPLOAD_FOLDER: {app.config['UPLOAD_FOLDER']}")
+print(f"🔍 [DEBUG] - Upload folder exists: {os.path.exists(app.config['UPLOAD_FOLDER'])}")
+
 # Database configuration с fallback
 database_url = os.getenv('DATABASE_URL')
 database_connected = False
@@ -119,6 +132,24 @@ if redis_url and redis_url.strip():
 else:
     print("⚠️ Redis URL not provided. Queue service disabled.")
 
+# 🔍 Middleware для логирования всех запросов с файлами
+@app.before_request
+def log_request_info():
+    from flask import request
+    if request.method == 'POST' and request.endpoint and 'video' in request.endpoint:
+        print(f"🔍 [DEBUG] === INCOMING REQUEST ===")
+        print(f"🔍 [DEBUG] Method: {request.method}")
+        print(f"🔍 [DEBUG] URL: {request.url}")
+        print(f"🔍 [DEBUG] Endpoint: {request.endpoint}")
+        print(f"🔍 [DEBUG] Content-Type: {request.content_type}")
+        print(f"🔍 [DEBUG] Content-Length: {request.content_length}")
+        print(f"🔍 [DEBUG] Files in request: {list(request.files.keys())}")
+        print(f"🔍 [DEBUG] Form data keys: {list(request.form.keys())}")
+        
+        # Логируем информацию о каждом файле
+        for field_name, file_obj in request.files.items():
+            print(f"🔍 [DEBUG] File field '{field_name}': filename='{file_obj.filename}', content_type='{file_obj.content_type}'")
+
 # Регистрация blueprints
 app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(video_bp, url_prefix='/api/video')
@@ -137,10 +168,16 @@ def health_check():
             'database': database_connected,
             'storage': storage_available,
             'queue': queue_available,
-            'cors': True
+            'cors': True,
+            'file_uploads': True
         },
         'database_type': 'PostgreSQL' if database_connected and database_url else 'SQLite',
-        'queue_info': queue_info
+        'queue_info': queue_info,
+        'file_config': {
+            'max_content_length': app.config['MAX_CONTENT_LENGTH'],
+            'upload_folder': app.config['UPLOAD_FOLDER'],
+            'upload_folder_exists': os.path.exists(app.config['UPLOAD_FOLDER'])
+        }
     })
 
 @app.route('/api/queue/status', methods=['GET'])
@@ -158,6 +195,17 @@ def queue_status():
         'queue_info': queue_manager.get_queue_info()
     })
 
+# 🚨 Обработчик ошибок для слишком больших файлов
+@app.errorhandler(413)
+def too_large(e):
+    print(f"❌ [DEBUG] File too large error: {e}")
+    return jsonify({
+        'success': False,
+        'error': 'File too large',
+        'max_size_mb': app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024),
+        'message': f'Maximum file size is {app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)} MB'
+    }), 413
+
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
@@ -171,7 +219,8 @@ def serve(path):
             'features': {
                 'database': database_connected,
                 'storage': storage_available,
-                'queue': queue_available
+                'queue': queue_available,
+                'file_uploads': True
             }
         })
 
@@ -189,7 +238,8 @@ def serve(path):
                 'features': {
                     'database': database_connected,
                     'storage': storage_available,
-                    'queue': queue_available
+                    'queue': queue_available,
+                    'file_uploads': True
                 }
             })
 
@@ -202,6 +252,7 @@ if __name__ == '__main__':
     print(f"🗄️ Database: {'PostgreSQL' if database_connected and database_url else 'SQLite (fallback)'}")
     print(f"📦 Storage: {'Supabase' if storage_available else 'Disabled'}")
     print(f"🔄 Queue: {'Redis' if queue_available else 'Disabled (sync processing)'}")
+    print(f"📁 File uploads: Enabled (max {app.config['MAX_CONTENT_LENGTH'] // (1024*1024)} MB)")
     
     app.run(host='0.0.0.0', port=port, debug=debug)
 
